@@ -33,6 +33,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skip_if_async_compile,
     skipIfRocm,
     TEST_WITH_ROCM,
 )
@@ -330,6 +331,7 @@ class TestMaxAutotune(TestCase):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
     @skipIfRocm
+    @skip_if_async_compile
     def test_autotune_conv1x1(self):
         # Assuming input has 3 channels and we want to produce 16 channels as output
         conv1x1 = (
@@ -635,6 +637,7 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
+    @skip_if_async_compile
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)

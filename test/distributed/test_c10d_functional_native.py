@@ -25,6 +25,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
+    skip_if_async_compile,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -220,6 +221,7 @@ class TestWithNCCL(MultiProcessTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @skip_if_async_compile
     # https://github.com/pytorch/pytorch/issues/126338
     def test_inductor_dtypeview_memory_leak(self):
         self._init_process_group()
@@ -454,6 +456,7 @@ class TestWithNCCL(MultiProcessTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @skip_if_async_compile
     @fresh_inductor_cache()
     def test_threading(self):
         self._init_process_group()

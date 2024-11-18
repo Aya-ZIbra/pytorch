@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     parametrize,
+    skip_if_async_compile,
     skipIfRocm,
     slowTest,
     TEST_MKL,
@@ -4621,6 +4622,7 @@ class CPUReproTests(TestCase):
             n_veckernel = 6 if op is torch.masked.mean else 3
             check_metrics_vec_kernel_count(n_veckernel)
 
+    @skip_if_async_compile
     @requires_vectorization
     def test_full_bits_lowp(self):
         def check_use_full_bits(func, shapes, dtype, mixed, check_vecn):
