@@ -412,7 +412,10 @@ class TritonTemplateKernel(TritonKernel):
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
-        self, subgraph_number: int, output_name: str, **fixed_inputs
+        self,
+        subgraph_number: int,
+        output_name: Optional[str],
+        **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
@@ -463,17 +466,39 @@ class TritonTemplateKernel(TritonKernel):
                 def indirect_indexing(self, index_var, size, check, wrap_neg=True):
                     return sympy_index_symbol(str(index_var))
 
+                def store(self, name, index, value, mode):
+                    add_input(name)
+                    return self._inner.store(name, index, value, mode)
+
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
                 assert isinstance(
-                    subgraph, ir.ComputedBuffer
+                    subgraph, (ir.ComputedBuffer, List)
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
-                if isinstance(subgraph.data, ir.InputBuffer):
+                # Handle scatter stores
+                if isinstance(subgraph, list):
+                    for scatter_graph in subgraph:
+                        assert isinstance(
+                            scatter_graph, ir.ComputedBuffer
+                        ), "Expected a scatter if subgraph is a list"
+
+                        def funx(x, strides):
+                            # We always create a fresh contiguous grad for scattering into
+                            return sum(x_i * stride for x_i, stride in zip(x, strides))
+
+                        my_funx = functools.partial(
+                            funx, strides=scatter_graph.get_stride()
+                        )
+                        scatter_graph.data.store_output(scatter_graph.name, my_funx, [])  # type: ignore[attr-defined]
+
+                elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
                     out = subgraph.data.inner_fn(())
 
             self.codegen_body()
-            self.body.writeline(f"{output_name} = {out.value}")
+            if output_name is not None:
+                assert isinstance(output_name, str)
+                self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
             self.cse.invalidate(set())  # type: ignore[arg-type]
@@ -783,18 +808,12 @@ class TritonTemplate(KernelTemplate):
             mod = PyCodeCache.load(code, extra)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        output_call_args = tuple(kernel.args.output_buffers.keys())
 
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
         expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
-        expected_output_args = (fake_out.get_name(),)
         assert input_call_args[: len(expected_input_args)] == expected_input_args, (
             input_call_args,
             expected_input_args,
-        )
-        assert output_call_args == expected_output_args, (
-            output_call_args,
-            expected_output_args,
         )
 
         full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])

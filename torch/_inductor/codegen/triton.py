@@ -1527,6 +1527,7 @@ class TritonKernel(SIMDKernel):
         has_rindex = False
 
         mask_vars: OrderedSet[str] = OrderedSet()
+
         for var in index_vars:
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(var, SymT.RINDEX)
@@ -1536,6 +1537,12 @@ class TritonKernel(SIMDKernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
+            elif "(" in var.name:
+                pass
+            elif symbol_is_type(var, SymT.TEMPLATE_INDEX):
+                # TODO check for scatter + masks
+                # Hmm why is this '(idx_m)'?
+                pass
             elif symbol_is_type(
                 var,
                 (
@@ -1554,7 +1561,6 @@ class TritonKernel(SIMDKernel):
                     var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
                 ), var.name
                 mask_vars.add(f"{var.name[0]}mask")
-
         need_dense = (
             config.triton.dense_indexing
             or dense_indexing
@@ -2067,6 +2073,11 @@ class TritonKernel(SIMDKernel):
         elif mode is None:
             line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
+            if isinstance(index, sympy.core.symbol.Symbol) and (
+                "(idx_m)" == index.name or "(idx_n)" == index.name
+            ):
+                index_no_paren = indexing.index_str.strip("()")
+                indexing.index_str = f"tl.broadcast_to({index_no_paren}, {value}.shape)"
             line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
         else:
             raise NotImplementedError(f"store mode={mode}")
