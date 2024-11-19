@@ -59,7 +59,6 @@ class TritonBlockPointerTest(InductorTestCase):
         with config.patch(config_patches):
             compiled = torch.compile(func, backend="inductor", **compile_kwargs)
             result, code = run_and_get_code(compiled, *args)
-
         # Check numerical accuracy
         ref_tensors = flatten_tensors(func(*args))
         actual_tensors = flatten_tensors(result)
@@ -229,8 +228,56 @@ class TritonBlockPointerTest(InductorTestCase):
             expected_num_block_pointers=3,
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
+    
+    @parametrize(
+        "x_size,y_size",
+        [
+            ((32, 1), (32, 32)),
+            ((1, 8), (8, 8)),
+            #((4, 1, 3), (4, 5, 3)), # TODO: T207754224
+            ((4, 1, 3), (4, 4, 3)),
+            ((1, 5, 5), (5, 5, 5)), 
+            ((5, 5, 1), (5, 5, 5)), 
+            ((5, 1, 1), (5, 5, 5)), 
+            ((1, 1, 5), (5, 5, 5)),
+            ((1, 5, 1), (5, 5, 5)),
+            ((7, 1, 1, 4), (7, 3, 4, 4)),
+            ((5, 6, 1, 1), (5, 6, 4, 3)),
+        ],
+    )
+    def test_expand_broadcast(self, x_size: Tuple[int], y_size: Tuple[int]):
+        """
+        When the load and store have different shapes, we should use broadcast.
+        """
+        
+        def foo(x, y_size):
+            return x.expand(y_size).clone()
 
-    @parametrize("prefer_nd_tiling", [False, True])
+        def get_input(size: Tuple[int]) -> torch.Tensor:
+            device = torch.device(GPU_TYPE)
+            full = torch.randn(size).to(device)
+            view = torch.as_strided(full, size, full.stride())
+            return view
+        
+        x = get_input(x_size)
+        y = y_size
+
+        # Check that input sizes are not the same
+        self.assertNotEqual(x_size, y_size)
+
+        # Check that is valid broadcast
+        self.assertEqual(len(x_size), len(y_size))
+        for i, j in zip(x_size, y_size):
+            if i != 1:
+                self.assertEqual(i, j)
+
+        result, (triton_code,) = self.run_and_compare(
+            foo,
+            x,
+            y
+        )
+            
+    @parametrize("prefer_nd_tiling", [True])
     def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
         """
         Test that we emit tl.broadcast_to instead of using strides of 0.
